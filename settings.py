@@ -48,7 +48,7 @@ if data_type == 0 :
     choice = 0 # CHANGE HERE
     database = ['worms','hands','leaves_sym','mpeg7','mpeg7_sampled100','horses','900_horses_leaves_worms']
 elif data_type == 1 :
-    choice = 0 # CHANGE HERE
+    choice = 2 # CHANGE HERE
     database = ['50_open_worms_6ctrlpts','200_open_worms_6ctrlpts','6376_open_worms_6ctrlpts']
 elif data_type == 2 :
     choice = 0 # CHANGE HERE
@@ -67,6 +67,8 @@ K = len(shapes_r)
 delta_k = K//4
 test_k_set = [i*delta_k for i in range(4)]
 
+if database[choice] == 'hands' :
+    test_k_set = [35,36,37,38] # for more interesting shapes to reconstruct
 if database[choice] in ['leaves_sym','leaves_Bsplines'] :
     test_k_set = [0,10,20,30] # for more interesting shapes to reconstruct
     
@@ -163,6 +165,7 @@ def mean(shapes) : # preshapes
 shapes = multi_real2complex(shapes_r) # complex configurations in C^N (not necessarily preshaped)
 shapes = multi_preshape(shapes) # complex preshapes
 original_shapes_r = shapes_r # saving the original shapes_r
+original_shapes = multi_real2complex(original_shapes_r)
 shapes_r = multi_complex2real(shapes) # so that we get preshaped real configurations
 
 'defining the normalized unit configuration'
@@ -184,12 +187,12 @@ elif data_type == 1 :
     z0 = np.concatenate( (z_ctrl,z_tgt) )
     z0 = z0 / norm(z0)
 elif data_type == 2 :
-    z_ctrl = np.exp(1j*2*np.pi*np.arange(M)/M+1j*np.pi)
+    z_ctrl = np.exp(1j*2*np.pi*np.arange(M)/M+1j*3*np.pi/2)
     z_tgt = 1j*z_ctrl/M
     z0 = np.concatenate( (z_ctrl,z_tgt) ) 
     z0 = z0 / norm(z0)
 elif data_type == 3 :
-    z0 = np.exp(1j*2*np.pi*np.arange(M)/M+1j*np.pi)
+    z0 = np.exp(1j*2*np.pi*np.arange(M)/M+1j*3*np.pi/2)
     z0 = z0 / norm(z0)
 
 
