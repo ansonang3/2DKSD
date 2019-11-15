@@ -38,7 +38,7 @@ from splines_utils import giveCubicBPhi, giveCubicBPsi, fitCubicBSpline, drawCub
 
 ''' DATASET '''
 
-data_type_names = ['landmarks','closed Hermite splines','open Hermite splines','closed cubic B-splines']
+data_type_names = ['landmarks','open Hermite splines','closed Hermite splines','closed cubic B-splines']
 
 data_type = 0 # CHANGE HERE
 
@@ -48,8 +48,8 @@ if data_type == 0 :
     choice = 0 # CHANGE HERE
     database = ['worms','hands','leaves_sym','mpeg7','mpeg7_sampled100','horses','900_horses_leaves_worms']
 elif data_type == 1 :
-    choice = 2 # CHANGE HERE
-    database = ['50_open_worms_6ctrlpts','200_open_worms_6ctrlpts','6376_open_worms_6ctrlpts']
+    choice = 0 # CHANGE HERE
+    database = ['6376_open_worms_6ctrlpts','200_open_worms_6ctrlpts','50_open_worms_6ctrlpts']
 elif data_type == 2 :
     choice = 0 # CHANGE HERE
     database = ['200_closed_worms_8ctrlpts','100_closed_worms_10ctrlpts']

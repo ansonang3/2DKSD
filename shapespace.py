@@ -39,12 +39,18 @@ def d_F(z,w) : # preshapes
     '''Full distance between [z] and [w]
     min_{alpha,theta} ||alpha e^{i theta} z - w||
                     = || w - P_z w || = ||z - P_w z|| \in [0,1] '''
-    return sqrt(1 - np.abs(her(z,w))**2)
+    aux = np.abs(her(z,w))**2
+    if aux > 1 : # due to numerical approximations, but mathematically should be <= 1
+        return 0.0
+    return sqrt(1 - aux)
 
 def d_P(z,w) : # preshapes
     '''Partial distance between [z] and [w]
     min_{theta}  ||e^{i theta} z - w||'''
-    return sqrt(2 - 2*np.abs(her(z,w)))
+    aux = 2*np.abs(her(z,w))
+    if aux > 2 : # same possibility as for d_F
+        return 0.0
+    return sqrt(2 - aux)
 
 def expo(z,v) : # z preshape, v in C^n referring to a tangent vector
     '''Computes the exponential of v at z, that corresponds to a preshape'''

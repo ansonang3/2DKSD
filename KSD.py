@@ -6,7 +6,8 @@ Created on Wed Aug  8 10:41:21 2018
 @author: Anna SONG
 
 KSD.py implements the `2D Kendall Shape Dictionary' that we propose in
-[Song, Uhlmann, Fageot & Unser (2019)].
+[Song, Uhlmann, Fageot & Unser, Dictionary Learning for 2D Kendall Shapes (2019)].
+
 Given a dataset of preshapes z_1,...,z_K in (C^N,Phi) endowed with the Hermitian
 product Phi, the original problem to be minimized by
 
@@ -87,7 +88,9 @@ from settings import multi_complex2real
 
 from shapespace import theta, align_rot
 
-
+import multiprocessing as mp
+from itertools import product
+from itertools import repeat
 
 ''' INITIALIZATION '''
 
@@ -301,7 +304,6 @@ def display(D_c,A_c,dataset,test_k_set=test_k_set,save = False,directory = None)
         display_res(dataset,DA,k,save = save,directory = directory)
 
 
-
 ''' MAIN ALGORITHM : 2D Kendall Shape Dictionary with the Method of Optimal Directions and 
     Cholesky-optimized Order Recursive Matching Pursuit '''
 
@@ -374,7 +376,12 @@ def KSD_optimal_directions(dataset,N0,J,init=None,Ntimes = 100,verbose=False,sav
         
         if verbose :
             diffs = dataset.T - D_c @ A_c
-            E = np.diag(diffs.T.conj() @ Phi @ diffs).sum().real
+            if K < 10000 :
+                E = np.diag(diffs.T.conj() @ Phi @ diffs).sum().real
+            else :
+                E = 0
+                for k in range(K) :
+                    E += (diffs[:,k].conj() @ Phi @ diffs[:,k]).real
             lossCurve = np.append(lossCurve,E)
             
         try :
@@ -405,12 +412,17 @@ def KSD_optimal_directions(dataset,N0,J,init=None,Ntimes = 100,verbose=False,sav
     print('duration of the algorithm: ', np.round(elapsed,2), 'seconds')
     
     diffs = dataset.T - D_c @ A_c
-    E = np.diag(diffs.T.conj() @ Phi @ diffs).sum().real
+    if K < 10000 :
+        E = np.diag(diffs.T.conj() @ Phi @ diffs).sum().real
+    else :
+        E = 0
+        for k in range(K) :
+            E += (diffs[:,k].conj() @ Phi @ diffs[:,k]).real
     
     print('FINAL RESULTS')
-    display(D_c,A_c,dataset, save = save,directory=directory) 
-    
     if verbose :
+        display(D_c,A_c,dataset, save = save,directory=directory) 
+
         lossCurve = np.append(lossCurve,E)
         plt.figure() ;
         plt.plot(np.arange(len(lossCurve)),lossCurve)
@@ -432,6 +444,8 @@ def KSD_optimal_directions(dataset,N0,J,init=None,Ntimes = 100,verbose=False,sav
     plt.show()
 
     print('Final loss : ',E)
+    print('RMSE :',np.sqrt(E/K))
+
     if save :
         text_file = open(directory + '/readme.txt','a')
         text_file.write('\nduration of the algorithm: {} s \n \n'.format(np.round(elapsed,2)))
@@ -441,11 +455,215 @@ def KSD_optimal_directions(dataset,N0,J,init=None,Ntimes = 100,verbose=False,sav
     return D_c,A_c,E
 
 
+def OMRP_multiproc_helper(k,D_c,dataset,G,N0) :
+    J = D_c.shape[1]
+    z = dataset[k]
+    vM = np.zeros((N0),dtype = complex)
+    rM = np.zeros((N0),dtype=int)
+
+    Un = np.zeros((N0,N0), dtype = complex)
+    Undn = np.zeros((J,N0),dtype = complex)
+    Gs = np.zeros((N0,J),dtype = complex)
+    norm2 = np.ones(J)
+    
+    rM[:] = -1
+    Rdn = D_c.T.conj() @ Phi @ z
+    scores = Rdn.copy()
+    
+    for l in range(N0) :
+        currind = np.argmax(np.abs(scores))
+        if np.abs(scores[currind]) < 1e-8 :
+            #print('finished with a sparsity l =',l,'for data',k)
+            break
+        
+        RU = scores[currind]
+        vM[l] = RU
+        rM[l] = currind
+        
+        Un[l,l] = -1
+        Un[:l,l] = Un[:l,:l] @ Undn[currind,:l].T
+        Un[:,l] = - Un[:,l] / np.sqrt(norm2[currind])
+        if l == N0-1 :
+            break
+        Gs[l] = G[currind]
+        Undn[:,l] = Un[:l+1,l].T.conj() @ Gs[:l+1,:]
+        
+        Rdn = Rdn - vM[l] * Undn[:,l].conj()
+        norm2 = norm2 - np.abs(Undn[:,l])**2
+        norm2[norm2<0] = 0 # sometimes happens to have small negative numbers
+        non_null = (norm2 > 1e-8)
+        scores = np.zeros(J,dtype=complex)
+        scores[non_null] = Rdn[non_null] / np.sqrt(norm2)[non_null]
+
+    vM = Un @ vM
+    
+    indices = [j for j in rM if j >= 0]
+    a = np.zeros(J,dtype = complex)
+    a[indices] = vM[:len(indices)]
+    return a     
+
+
+def KSD_optimal_directions_multiproc_ORMP(dataset,N0,J,init=None,Ntimes = 100,batch_size=1024,verbose=False,save=False,directory = None) :
+    '''See KSD_optimal_directions().
+    
+    THIS FUNCTION IS INTERESTING ONLY FOR LARGE DATASETS (K > 4000 for instance).
+    
+    In this function, the ORMP sparse coding step in computed in parallel and independently
+    on the different z_k, by randomly chosen batches of size given in batch_size,
+    thanks to the multiprocessing library run with the function OMRP_multiproc_helper(). 
+    '''
+    K = len(dataset)
+    
+    if type(init) == np.ndarray :
+        D_c = init
+    else :
+        D_c = initializeD_c(J,dataset)
+    if verbose :
+        print('Initializing the dictionary.')
+        drawMany(D_c.T,force = True)
+        lossCurve = np.array([])
+        
+    A_c = np.zeros((J,K),dtype = complex)    
+
+    print("Let's wait for {} iterations...".format(Ntimes))
+    start = time.time()        
+
+    for t in range(Ntimes) :
+        
+        if t % 5 == 0 :
+            print('t =',t)
+        
+        indices = np.arange(K)
+        random.shuffle(indices)
+        indices = indices[:batch_size]
+
+        'parallel ORMP used, avoids distorted atoms but increases run-time'
+        G = D_c.T.conj() @ Phi @ D_c
+        pool = mp.Pool(mp.cpu_count())
+        results = pool.starmap(OMRP_multiproc_helper,zip(indices,repeat(D_c),repeat(dataset),repeat(G),repeat(N0)))
+        pool.close()
+        A_c[:,indices] = np.array(results).T
+        
+        if verbose :
+            diffs = dataset.T - D_c @ A_c
+            if K < 10000 :
+                E = np.diag(diffs.T.conj() @ Phi @ diffs).sum().real
+            else :
+                E = 0
+                for k in range(K) :
+                    E += (diffs[:,k].conj() @ Phi @ diffs[:,k]).real
+            lossCurve = np.append(lossCurve,E)
+            
+        try :
+            Mat = np.linalg.inv(A_c @ A_c.T.conj())
+        except np.linalg.LinAlgError :
+            global A_error
+            A_error = A_c
+            print('A @ A^H not invertible, using SVD')
+            U,sigmas,VH = np.linalg.svd(A_c)
+            sigmas_rec = reciprocal(sigmas)
+            Sigma_rec = fill_diagonal(sigmas_rec,J,K)
+            D_c = dataset.T @ VH.T.conj() @ Sigma_rec @ U.T.conj()
+        else :
+            D_c = dataset.T @ A_c.T.conj() @ Mat
+
+        D_c = normalize(D_c) # the new atoms are preshaped
+
+        purge_j = np.where((np.abs(A_c)>1e-3).sum(axis=1)/K < N0/(5*J))[0]
+        purged_list = []
+        for j in range(J) :
+            if norm(D_c[:,j]) < 1e-8 or j in purge_j :
+                purged_list += [j]
+                #print('purged ',j,'at iteration',t)
+                D_c[:,j] = shapes[np.random.randint(K)]
+        if len(purged_list) > 0 :
+            print('purged atoms ', purged_list, 'at iteration',t)
+
+    print('using parallel ORMP to compute the final weights...')
+    
+    'parallel ORMP used for the final computation'
+    G = D_c.T.conj() @ Phi @ D_c
+    pool = mp.Pool(mp.cpu_count())
+    results = pool.starmap(OMRP_multiproc_helper,zip(range(K),repeat(D_c),repeat(dataset),repeat(G),repeat(N0)))
+    pool.close()
+    A_c = np.array(results).T
+                
+    elapsed = (time.time() - start)
+    print('duration of the algorithm: ', np.round(elapsed,2), 'seconds')
+    
+    diffs = dataset.T - D_c @ A_c
+    if K < 10000 :
+        E = np.diag(diffs.T.conj() @ Phi @ diffs).sum().real
+    else :
+        E = 0
+        for k in range(K) :
+            E += (diffs[:,k].conj() @ Phi @ diffs[:,k]).real
+    
+    print('FINAL RESULTS')
+    
+    display(D_c,A_c,dataset, save = save,directory=directory) 
+
+    if verbose :
+        lossCurve = np.append(lossCurve,E)
+        plt.figure() ;
+        plt.plot(np.arange(len(lossCurve)),lossCurve)
+        plt.title('Loss curve for the KSD algorithm')
+        if save : plt.savefig(directory + '/losscurve.png',dpi = 100)
+    plt.show()
+        
+    drawMany(D_c.T,force = False,show = False)
+    plt.title('KSD dictionary  N0 = {}  J = {}'.format(N0,J))
+    if save :
+        plt.savefig(directory + '/dico_KSD.png',dpi = 200)
+    plt.show()
+
+    D_al = align_rot(D_c.T).T
+    drawMany(D_al.T,force = False,show = False)
+    plt.title('KSD rotated dictionary  N0 = {}  J = {}'.format(N0,J))
+    if save :
+        plt.savefig(directory + '/dico_KSD_rotated.png',dpi = 200)
+    plt.show()
+
+    print('Final loss : ',E)
+    print('RMSE :',np.sqrt(E/K))
+    if save :
+        text_file = open(directory + '/readme.txt','a')
+        text_file.write('\nduration of the algorithm: {} s \n \n'.format(np.round(elapsed,2)))
+        text_file.write('Final loss: {}\n'.format(E))
+        text_file.write('Final RMSE: {}\n'.format(np.sqrt(E/K)))
+        text_file.close()
+
+    return D_c,A_c,E
+
+
+
+def KSD_RMSE_curve(dataset,J) :
+    '''
+    For a fixed J (nb of atoms imposed), for any N0 <= J,
+    run 2DKSD and record the RMSE(N0,J). Return the RMSE curve.
+    
+    Do not run on too large datasets!! (K > 10000)
+    '''
+    K = len(dataset)
+    curve = np.zeros(J)
+    for N0 in range(1,J+1) :
+        D_c,A_c,E_KSD = KSD_optimal_directions(shapes,N0,J,
+                           Ntimes = 30,verbose=False)
+        curve[N0-1] = np.sqrt(E_KSD/K)
+    plt.plot(curve)
+    plt.show()
+    return curve
+
+
 if __name__ == '__main__' :
     
     learn_dico = True
-    N0,J = 6,20
+    N0,J = 5,10
     SAVE = True
+    
+    MULTIPROC_ORMP = False
+    # True if you want to multiprocess ORMP
+    # interesting only for large datasets K > 4000
     
     if learn_dico :
         
@@ -460,11 +678,22 @@ if __name__ == '__main__' :
                     SAVE = False
                     print('WILL NOT OVERWRITE PREVIOUS SAVED RESULTS')
     
-                
-        D_c,A_c,E_KSD = KSD_optimal_directions(shapes,N0,J,init = None,
-                                           Ntimes = 40,verbose=True,
-                                           save=SAVE,directory=directory)
-            
-            
+        if MULTIPROC_ORMP :
+            from functools import partial 
+            KSD = partial(KSD_optimal_directions_multiproc_ORMP,
+                          batch_size = K) # 1024 ~ 2048 ~ 4096
+            # you can set the batch size to the size of the dataset to
+            #multiprocess ORMP on the whole dataset
+            print('USING PARALLELIZED AND/OR BATCHED VERSION OF ORMP')
+            print('change the batch size if needed')
+        else :
+            KSD = KSD_optimal_directions
+                    
         
-   
+        D_c,A_c,E_KSD = KSD(shapes,N0,J,init = None,
+                            Ntimes = 30,verbose=False,
+                            save=SAVE,directory=directory)
+        
+                    # change Ntimes as needed if you see that
+                    # the loss curve has not finished converging (in verbose=True mode)
+                    # and put verbose = False to speed up the process and have actual run-time
